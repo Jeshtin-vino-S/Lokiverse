@@ -22,9 +22,16 @@ const clientOrigin = process.env.CLIENT_ORIGIN || "http://localhost:3000";
 const app = express();
 const httpServer = http.createServer(app);
 
+const allowedOrigins = [
+  clientOrigin,
+  "http://localhost:3000",
+  "http://127.0.0.1:3000",
+  "https://lokiverse.onrender.com",
+];
+
 // Configure CORS for Express
 app.use(cors({
-  origin: [clientOrigin, "http://localhost:3000", "http://127.0.0.1:3000"],
+  origin: allowedOrigins,
   credentials: true,
 }));
 
@@ -43,7 +50,7 @@ app.use("/api/messages", messageRoute);
 // Configure Socket.IO with CORS
 const io = new Server(httpServer, {
   cors: {
-    origin: [clientOrigin, "http://localhost:3000", "http://127.0.0.1:3000"],
+    origin: allowedOrigins,
     methods: ["GET", "POST"],
     credentials: true,
   },

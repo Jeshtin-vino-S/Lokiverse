@@ -7,8 +7,8 @@ export const getAuthToken = () => {
   return "";
 };
 
-// Target backend URL
-const SOCKET_URL = "http://localhost:5000";
+// Target backend URL (Render deployed backend)
+const SOCKET_URL = "https://lokiverse.onrender.com";
 
 // Shared socket instance with credentials and dynamic auth
 export const socket = io(SOCKET_URL, {

@@ -8,7 +8,8 @@ import './avengers-fx-2.css'
 import App from './App.jsx'
 import { ThemeProvider } from './context/ThemeContext'
 
-// Enable sending cookies with all axios requests
+// Set deployed backend URL & enable credentials for all axios requests
+axios.defaults.baseURL = "https://lokiverse.onrender.com";
 axios.defaults.withCredentials = true;
 
 createRoot(document.getElementById('root')).render(

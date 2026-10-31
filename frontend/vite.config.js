@@ -12,20 +12,25 @@ export default defineConfig({
     port: 3000,
     proxy: {
       '/auth': {
-        target: 'http://localhost:5000',
+        target: 'https://lokiverse.onrender.com',
         changeOrigin: true,
+        secure: false,
       },
       '/api': {
-        target: 'http://localhost:5000',
+        target: 'https://lokiverse.onrender.com',
         changeOrigin: true,
+        secure: false,
       },
       '/uploads': {
-        target: 'http://localhost:5000',
+        target: 'https://lokiverse.onrender.com',
         changeOrigin: true,
+        secure: false,
       },
       '/socket.io': {
-        target: 'http://localhost:5000',
+        target: 'https://lokiverse.onrender.com',
         ws: true,
+        changeOrigin: true,
+        secure: false,
       },
     },
   },

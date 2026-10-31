@@ -1,5 +1,6 @@
 import express from 'express';
 import http from 'http';
+import path from 'path';
 import cors from 'cors';
 import { Server } from 'socket.io';
 import jwt from 'jsonwebtoken';
@@ -21,6 +22,7 @@ const port = process.env.PORT || 5000;
 const clientOrigin = process.env.CLIENT_ORIGIN || "http://localhost:3000";
 const app = express();
 const httpServer = http.createServer(app);
+const __dirname = path.resolve();
 
 const allowedOrigins = [
   clientOrigin,
@@ -46,6 +48,19 @@ app.use("/api/users", userRoute);
 app.use("/api/notifications", notificationRoute);
 app.use("/api/posts", postRoute);
 app.use("/api/messages", messageRoute);
+
+// Serve Frontend static assets in production
+if (process.env.NODE_ENV === "production") {
+  app.use(express.static(path.join(__dirname, "frontend/dist")));
+
+  app.use((req, res, next) => {
+    // Only handle GET requests for frontend SPA routing; let API routes pass through
+    if (req.method === "GET" && !req.path.startsWith("/api") && !req.path.startsWith("/auth") && !req.path.startsWith("/uploads")) {
+      return res.sendFile(path.resolve(__dirname, "frontend", "dist", "index.html"));
+    }
+    next();
+  });
+}
 
 // Configure Socket.IO with CORS
 const io = new Server(httpServer, {

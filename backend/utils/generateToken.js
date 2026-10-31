@@ -1,7 +1,8 @@
 import jwt from 'jsonwebtoken';
 
 const generateToken = (userId, res) => {
-    const token = jwt.sign({ userId }, process.env.JWT_SECRET, {
+    const secret = process.env.JWT_SECRET || "lokiverse_jwt_secret_key_default_2026";
+    const token = jwt.sign({ userId }, secret, {
         expiresIn: "15d"
     });
 

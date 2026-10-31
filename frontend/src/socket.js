@@ -7,21 +7,17 @@ export const getAuthToken = () => {
   return "";
 };
 
-// Target backend URL: Configurable via environment variable (VITE_BACKEND_URL or VITE_SOCKET_URL)
-// Defaults to current window origin in production, or localhost:5000 during local dev
-const envBackendUrl = import.meta.env.VITE_BACKEND_URL || import.meta.env.VITE_SOCKET_URL;
+// Target backend URL:
+// In local dev (localhost / 127.0.0.1): connect to local backend on port 5000
+// In production (Render or any cloud host): connect to current deployed website origin
 const isLocal =
   typeof window !== "undefined" &&
   (window.location.hostname === "localhost" ||
     window.location.hostname === "127.0.0.1");
 
-const defaultUrl = isLocal
+const SOCKET_URL = isLocal
   ? "http://localhost:5000"
-  : typeof window !== "undefined"
-  ? window.location.origin
-  : "";
-
-const SOCKET_URL = envBackendUrl || defaultUrl;
+  : (typeof window !== "undefined" ? window.location.origin : "");
 
 // Shared socket instance with credentials and dynamic auth
 export const socket = io(SOCKET_URL, {

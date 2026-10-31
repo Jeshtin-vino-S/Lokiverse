@@ -13,7 +13,8 @@ const protectRoute = async (req, res, next) => {
             return res.status(401).json({ error: "Unauthorized: No token provided" });
         }
 
-        const decoded = jwt.verify(token, process.env.JWT_SECRET);
+        const secret = process.env.JWT_SECRET || "lokiverse_jwt_secret_key_default_2026";
+        const decoded = jwt.verify(token, secret);
         if (!decoded || !decoded.userId) {
             return res.status(401).json({ error: "Unauthorized: Invalid Token" });
         }

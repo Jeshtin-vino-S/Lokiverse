@@ -1,0 +1,59 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+html, body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  overflow-x: clip;
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+/* Light Mode (White / Default after login) */
+html:not(.dark), html.light {
+  background-color: #f8fafc;
+  color: #0f172a;
+}
+html:not(.dark) body, html.light body {
+  background-color: #f8fafc;
+  color: #0f172a;
+}
+
+/* Dark Mode (Lokiverse Cosmic Obsidian) */
+html.dark, html.dark body {
+  background-color: #06080e;
+  color: #e2e8f0;
+}
+
+/* Lokiverse Cosmic & Sacred Timeline Ambient Layer (Soothing, Premium, Cinematic) */
+.avengers-bg-ambient {
+  background: 
+    radial-gradient(circle at 14% 18%, rgba(16, 185, 129, 0.12) 0%, transparent 45%),
+    radial-gradient(circle at 86% 75%, rgba(251, 191, 36, 0.09) 0%, transparent 48%),
+    radial-gradient(circle at 50% 10%, rgba(14, 165, 233, 0.06) 0%, transparent 45%),
+    linear-gradient(to bottom, rgba(6, 8, 14, 0.94) 0%, rgba(5, 7, 12, 0.96) 50%, rgba(6, 8, 14, 0.98) 100%);
+}
+
+.avengers-bg-ambient-light {
+  background: 
+    radial-gradient(circle at 14% 18%, rgba(16, 185, 129, 0.08) 0%, transparent 45%),
+    radial-gradient(circle at 86% 75%, rgba(251, 191, 36, 0.06) 0%, transparent 48%),
+    radial-gradient(circle at 50% 10%, rgba(14, 165, 233, 0.05) 0%, transparent 45%),
+    linear-gradient(to bottom, #ffffff 0%, #f8fafc 50%, #f1f5f9 100%);
+}
+
+.avengers-grid-overlay {
+  background-size: 44px 44px;
+  background-image: 
+    linear-gradient(to right, rgba(255, 255, 255, 0.015) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.015) 1px, transparent 1px);
+}
+
+.avengers-grid-overlay-light {
+  background-size: 44px 44px;
+  background-image: 
+    linear-gradient(to right, rgba(0, 0, 0, 0.03) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(0, 0, 0, 0.03) 1px, transparent 1px);
+}

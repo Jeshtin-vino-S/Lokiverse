@@ -1,0 +1,70 @@
+/* ===== AVENGERS HERO FX ===== */
+
+/* Spin animation for Arc Reactor & Doctor Strange Portal */
+@keyframes lv-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+/* ---- THOR: lightning overlay (created by heroFx.js) ---- */
+.fx-thunder { position: fixed; inset: 0; z-index: 9999; pointer-events: none; }
+.fx-thunder svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+.fx-thunder polyline {
+  fill: none; stroke: #cfe6ff; stroke-width: 3; stroke-linejoin: round; stroke-linecap: round;
+  filter: drop-shadow(0 0 6px #5aa9ff) drop-shadow(0 0 16px #2f6fd6);
+  stroke-dasharray: 1; stroke-dashoffset: 1;
+  animation: fx-bolt .35s ease-out forwards;
+}
+.fx-thunder::before { content: ""; position: absolute; inset: 0; background: rgba(120, 180, 255, .28); animation: fx-flash .45s ease-out forwards; }
+@keyframes fx-bolt { to { stroke-dashoffset: 0; opacity: 0; } 70% { opacity: 1; } }
+@keyframes fx-flash { 0% { opacity: 1; } 100% { opacity: 0; } }
+
+/* ---- SPIDER-MAN: web draws itself, then sways ---- */
+.fx-web { position: absolute; top: 0; left: 0; width: 220px; height: 220px; pointer-events: none; opacity: .75; transform-origin: 0 0; animation: fx-sway 6s ease-in-out infinite alternate; z-index: 20; }
+.fx-web path { fill: none; stroke: rgba(232, 234, 240, 0.85); stroke-width: 1.4; stroke-dasharray: 1; stroke-dashoffset: 1; animation: fx-draw 1.6s ease-out forwards; filter: drop-shadow(0 0 2px rgba(255, 255, 255, 0.4)); }
+.fx-web path:nth-child(n+7) { animation-delay: .6s; }   /* arcs draw after spokes */
+@keyframes fx-draw { to { stroke-dashoffset: 0; } }
+@keyframes fx-sway { from { transform: rotate(-1.5deg) skewX(0deg); } to { transform: rotate(1.5deg) skewX(2deg); } }
+.fx-web--right { left: auto; right: 0; transform-origin: 100% 0; animation-name: fx-sway-right; }
+@keyframes fx-sway-right { from { transform: scaleX(-1) rotate(-1.5deg) skewX(0deg); } to { transform: scaleX(-1) rotate(1.5deg) skewX(2deg); } }
+
+/* ---- IRON MAN: arc reactor loader ---- */
+.fx-reactor { width: 56px; height: 56px; border-radius: 50%; position: relative;
+  background: radial-gradient(circle, #fff 0 12%, #9eeaff 13% 28%, transparent 30%);
+  box-shadow: 0 0 22px #4fd8ff, inset 0 0 14px #4fd8ff; animation: fx-core 1.4s ease-in-out infinite; }
+.fx-reactor::before { content: ""; position: absolute; inset: 6px; border-radius: 50%;
+  border: 3px dashed #4fd8ff; animation: lv-spin 4s linear infinite; }
+.fx-reactor::after { content: ""; position: absolute; inset: -8px; border-radius: 50%; border: 2px solid rgba(79, 216, 255, .5); }
+@keyframes fx-core { 50% { box-shadow: 0 0 38px #4fd8ff, inset 0 0 20px #4fd8ff; } }
+
+/* ---- HULK: shake + green flash (add .fx-smash via JS on error/delete) ---- */
+.fx-smash { animation: fx-hulk .5s cubic-bezier(.36, .07, .19, .97) both; }
+@keyframes fx-hulk {
+  10%, 90% { transform: translate3d(-2px, 0, 0); } 20%, 80% { transform: translate3d(4px, 0, 0); }
+  30%, 50%, 70% { transform: translate3d(-7px, 0, 0); } 40%, 60% { transform: translate3d(7px, 0, 0); }
+  0%, 100% { box-shadow: 0 0 0 rgba(60, 220, 80, 0); } 30% { box-shadow: 0 0 28px rgba(60, 220, 80, .8); }
+}
+
+/* ---- CAPTAIN AMERICA: shield bounce on success (.fx-shield) ---- */
+.fx-shield { animation: fx-shield .6s cubic-bezier(.3, 1.6, .5, 1); }
+@keyframes fx-shield { 0% { transform: scale(.7) rotate(-12deg); } 60% { transform: scale(1.15) rotate(6deg); } 100% { transform: scale(1) rotate(0); } }
+
+/* ---- THANOS: snap fade for deleted posts (.fx-snap) ---- */
+.fx-snap { animation: fx-snap 1.1s ease-in forwards; pointer-events: none; }
+@keyframes fx-snap {
+  0% { opacity: 1; filter: blur(0); transform: none; }
+  100% { opacity: 0; filter: blur(8px) sepia(1) saturate(3); transform: translate(60px, -30px) rotate(5deg) scale(.94); }
+}
+
+/* ---- DOCTOR STRANGE: portal ring (put <div class="fx-portal"/> over a modal / search) ---- */
+.fx-portal { width: 160px; height: 160px; border-radius: 50%; border: 4px solid #ff9a2e;
+  box-shadow: 0 0 24px #ff9a2e, inset 0 0 24px #ff9a2e; animation: lv-spin 3s linear infinite;
+  background: repeating-conic-gradient(from 0deg, rgba(255, 154, 46, .9) 0 6deg, transparent 6deg 18deg);
+  -webkit-mask: radial-gradient(circle, transparent 55%, #000 57%); mask: radial-gradient(circle, transparent 55%, #000 57%); }
+
+@media (prefers-reduced-motion: reduce) {
+  .fx-web, .fx-reactor, .fx-reactor::before, .fx-portal { animation: none !important; }
+  .fx-web path { stroke-dashoffset: 0; }
+  .fx-thunder { display: none; }
+}
+

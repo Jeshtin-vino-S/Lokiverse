@@ -23,10 +23,24 @@ const Chat = ({ roomId, username, recipientUser, onBack }) => {
   const [onlineUsers, setOnlineUsers] = useState([]);
   const [recipientLastSeen, setRecipientLastSeen] = useState(recipientUser?.lastSeen || null);
 
+  // Edit, Unsend & Reaction states
+  const [editingMessageId, setEditingMessageId] = useState(null);
+  const [editingText, setEditingText] = useState("");
+  const [activeReactionPickerId, setActiveReactionPickerId] = useState(null);
+  const [currentTime, setCurrentTime] = useState(Date.now());
+
   const messagesEndRef = useRef(null);
   const scrollContainerRef = useRef(null);
   const loadingOlderRef = useRef(false);
   const shouldAutoScrollRef = useRef(true);
+
+  // 5-minute edit limit timer ticker (updates every 30s to automatically hide edit option after 5 mins)
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setCurrentTime(Date.now());
+    }, 30000);
+    return () => clearInterval(timer);
+  }, []);
 
   // Sync recipient last seen
   useEffect(() => {
@@ -111,6 +125,18 @@ const Chat = ({ roomId, username, recipientUser, onBack }) => {
 
     fetchInitialHistory();
 
+    // Mark messages in this room as read
+    const markRoomAsRead = async () => {
+      try {
+        await axios.put(`/api/messages/${encodeURIComponent(roomId)}/read`);
+        socket.emit("mark_messages_read", { roomId });
+        window.dispatchEvent(new Event("messageCountUpdated"));
+      } catch {
+        // silent
+      }
+    };
+    markRoomAsRead();
+
     // Connect socket and join room
     connectSocket();
     socket.emit("join_room", roomId);
@@ -129,6 +155,12 @@ const Chat = ({ roomId, username, recipientUser, onBack }) => {
           }
           return [...prev, savedMessage];
         });
+
+        // Since user is currently inside this active room, mark as read immediately
+        if (savedMessage.sender !== username) {
+          socket.emit("mark_messages_read", { roomId });
+          window.dispatchEvent(new Event("messageCountUpdated"));
+        }
       }
     };
 
@@ -138,15 +170,41 @@ const Chat = ({ roomId, username, recipientUser, onBack }) => {
       setErrorMessage(errorText || "Message failed to send");
     };
 
+    // Real-time unsend (delete from state when removed from DB)
+    const handleMessageUnsent = ({ messageId }) => {
+      setMessages((prev) => prev.filter((m) => m._id !== messageId));
+    };
+
+    // Real-time edit update
+    const handleMessageEdited = (updatedMsg) => {
+      if (!updatedMsg) return;
+      setMessages((prev) =>
+        prev.map((m) => (m._id === updatedMsg._id ? updatedMsg : m))
+      );
+    };
+
+    // Real-time reaction update
+    const handleMessageReactionUpdated = ({ messageId, reactions }) => {
+      setMessages((prev) =>
+        prev.map((m) => (m._id === messageId ? { ...m, reactions } : m))
+      );
+    };
+
     socket.on("connect", handleConnect);
     socket.on("receive_message", handleReceiveMessage);
     socket.on("message_error", handleMessageError);
+    socket.on("message_unsent", handleMessageUnsent);
+    socket.on("message_edited", handleMessageEdited);
+    socket.on("message_reaction_updated", handleMessageReactionUpdated);
 
     return () => {
       isMounted = false;
       socket.off("connect", handleConnect);
       socket.off("receive_message", handleReceiveMessage);
       socket.off("message_error", handleMessageError);
+      socket.off("message_unsent", handleMessageUnsent);
+      socket.off("message_edited", handleMessageEdited);
+      socket.off("message_reaction_updated", handleMessageReactionUpdated);
     };
   }, [roomId]);
 
@@ -247,6 +305,76 @@ const Chat = ({ roomId, username, recipientUser, onBack }) => {
     } catch {
       return "";
     }
+  };
+
+  // Group reactions by emoji
+  const getGroupedReactions = (reactions = []) => {
+    if (!Array.isArray(reactions)) return [];
+    const map = {};
+    reactions.forEach((r) => {
+      if (!r || !r.emoji) return;
+      if (!map[r.emoji]) {
+        map[r.emoji] = { emoji: r.emoji, count: 0, users: [], hasReacted: false };
+      }
+      map[r.emoji].count += 1;
+      map[r.emoji].users.push(r.user);
+      if (r.user === username) {
+        map[r.emoji].hasReacted = true;
+      }
+    });
+    return Object.values(map);
+  };
+
+  // Toggle emoji reaction
+  const handleToggleReaction = (messageId, emoji) => {
+    socket.emit("react_message", { messageId, roomId, emoji });
+    setActiveReactionPickerId(null);
+  };
+
+  // Unsend message (deletes permanently from DB)
+  const handleUnsend = (messageId) => {
+    if (window.confirm("Unsend this message? It will be permanently deleted for everyone.")) {
+      socket.emit("unsend_message", { messageId, roomId });
+      // Optimistic delete
+      setMessages((prev) => prev.filter((m) => m._id !== messageId));
+    }
+  };
+
+  // Start edit (only allowed within 5 minutes)
+  const handleStartEdit = (msg) => {
+    const messageAge = msg.createdAt ? Date.now() - new Date(msg.createdAt).getTime() : 0;
+    if (messageAge > 5 * 60 * 1000) {
+      setErrorMessage("Messages can only be edited within 5 minutes of sending.");
+      return;
+    }
+    setEditingMessageId(msg._id);
+    setEditingText(msg.text);
+    setActiveReactionPickerId(null);
+  };
+
+  // Save edit (enforces 5-minute limit)
+  const handleSaveEdit = (messageId) => {
+    const trimmed = editingText.trim();
+    if (!trimmed) return;
+    const targetMsg = messages.find((m) => m._id === messageId);
+    if (targetMsg && targetMsg.createdAt) {
+      const messageAge = Date.now() - new Date(targetMsg.createdAt).getTime();
+      if (messageAge > 5 * 60 * 1000) {
+        setErrorMessage("Edit window expired. Messages can only be edited within 5 minutes of sending.");
+        setEditingMessageId(null);
+        setEditingText("");
+        return;
+      }
+    }
+    socket.emit("edit_message", { messageId, roomId, text: trimmed });
+    setEditingMessageId(null);
+    setEditingText("");
+  };
+
+  // Cancel edit
+  const handleCancelEdit = () => {
+    setEditingMessageId(null);
+    setEditingText("");
   };
 
   const isGroup = !roomId?.includes("_");
@@ -429,17 +557,29 @@ const Chat = ({ roomId, username, recipientUser, onBack }) => {
           const showAvatar =
             !isMe &&
             (index === messages.length - 1 || messages[index + 1]?.sender !== msg.sender);
+          const isEditingThis = editingMessageId === msg._id;
+          const isPickerOpen = activeReactionPickerId === msg._id;
+          const groupedReactions = getGroupedReactions(msg.reactions);
+          const messageAge = msg.createdAt ? currentTime - new Date(msg.createdAt).getTime() : 0;
+          const isWithin5Min = messageAge <= 5 * 60 * 1000;
+          const canEdit = isMe && !isEditingThis && isWithin5Min;
 
           return (
             <div
               key={msg._id}
-              className={`flex items-end gap-2 group ${isMe ? "justify-end" : "justify-start"}`}
+              className={`flex items-end gap-2 group relative ${
+                isMe ? "justify-end" : "justify-start"
+              }`}
             >
               {!isMe && (
                 <div className="w-7 h-7 rounded-full shrink-0 overflow-hidden mb-0.5">
                   {showAvatar ? (
                     displayAvatar ? (
-                      <img src={displayAvatar} alt="" className="w-full h-full object-cover" />
+                      <img
+                        src={displayAvatar}
+                        alt=""
+                        className="w-full h-full object-cover"
+                      />
                     ) : (
                       <div className="w-full h-full bg-emerald-600 text-white text-[10px] font-bold flex items-center justify-center">
                         {msg.sender?.slice(0, 2).toUpperCase()}
@@ -451,28 +591,207 @@ const Chat = ({ roomId, username, recipientUser, onBack }) => {
                 </div>
               )}
 
+              {/* Action buttons (Appear on hover or tap) */}
+              <div
+                className={`flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity mb-2 shrink-0 ${
+                  isMe ? "order-first" : "order-last"
+                }`}
+              >
+                {/* Emoji Reaction Trigger */}
+                <div className="relative">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setActiveReactionPickerId(isPickerOpen ? null : msg._id)
+                    }
+                    className="p-1 rounded-full text-slate-400 hover:text-amber-500 hover:bg-slate-100 dark:hover:bg-white/10 transition-colors cursor-pointer"
+                    title="Add reaction"
+                  >
+                    <svg
+                      viewBox="0 0 24 24"
+                      width="15"
+                      height="15"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <circle cx="12" cy="12" r="10" />
+                      <path d="M8 14s1.5 2 4 2 4-2 4-2" />
+                      <line x1="9" y1="9" x2="9.01" y2="9" />
+                      <line x1="15" y1="9" x2="15.01" y2="9" />
+                    </svg>
+                  </button>
+
+                  {/* Floating 6-Emoji Reaction Bar */}
+                  {isPickerOpen && (
+                    <div
+                      className={`absolute bottom-full mb-1 z-30 flex items-center gap-1 p-1 bg-white dark:bg-[#1f1f1f] border border-slate-200 dark:border-white/15 rounded-full shadow-xl animate-in fade-in zoom-in-95 duration-150 ${
+                        isMe ? "right-0" : "left-0"
+                      }`}
+                    >
+                      {["❤️", "😂", "😮", "😢", "🔥", "👍"].map((emoji) => (
+                        <button
+                          key={emoji}
+                          type="button"
+                          onClick={() => handleToggleReaction(msg._id, emoji)}
+                          className="w-7 h-7 rounded-full flex items-center justify-center hover:scale-130 transition-transform cursor-pointer text-sm hover:bg-slate-100 dark:hover:bg-white/10"
+                        >
+                          {emoji}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Edit Message Button (Sender Only, only within 5 minutes) */}
+                {canEdit && (
+                  <button
+                    type="button"
+                    onClick={() => handleStartEdit(msg)}
+                    className="p-1 rounded-full text-slate-400 hover:text-emerald-500 hover:bg-slate-100 dark:hover:bg-white/10 transition-colors cursor-pointer"
+                    title="Edit message (within 5 minutes)"
+                  >
+                    <svg
+                      viewBox="0 0 24 24"
+                      width="14"
+                      height="14"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <path d="M12 20h9" />
+                      <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
+                    </svg>
+                  </button>
+                )}
+
+                {/* Unsend Message Button (Sender Only: Deletes from DB) */}
+                {isMe && !isEditingThis && (
+                  <button
+                    type="button"
+                    onClick={() => handleUnsend(msg._id)}
+                    className="p-1 rounded-full text-slate-400 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-500/10 transition-colors cursor-pointer"
+                    title="Unsend (Delete from DB)"
+                  >
+                    <svg
+                      viewBox="0 0 24 24"
+                      width="14"
+                      height="14"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <polyline points="3 6 5 6 21 6" />
+                      <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                    </svg>
+                  </button>
+                )}
+              </div>
+
+              {/* Message Bubble + Reactions Container */}
               <div className="flex flex-col max-w-[75%] sm:max-w-[65%]">
                 {isGroup && !isMe && (
                   <span className="text-[10px] font-semibold text-slate-400 ml-3 mb-0.5">
                     @{msg.sender}
                   </span>
                 )}
+
+                {/* Inline Edit Input OR Regular Message Bubble */}
+                {isEditingThis ? (
+                  <div className="flex flex-col gap-1.5 p-2 rounded-2xl bg-slate-100 dark:bg-[#1a1a1a] border border-emerald-500/50 shadow-md min-w-[220px]">
+                    <textarea
+                      value={editingText}
+                      onChange={(e) => setEditingText(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" && !e.shiftKey) {
+                          e.preventDefault();
+                          handleSaveEdit(msg._id);
+                        } else if (e.key === "Escape") {
+                          handleCancelEdit();
+                        }
+                      }}
+                      rows={2}
+                      className="w-full bg-white dark:bg-black/60 p-2 text-xs rounded-lg border border-slate-300 dark:border-white/10 outline-none text-slate-900 dark:text-white resize-none"
+                      autoFocus
+                    />
+                    <div className="flex items-center justify-end gap-1.5 text-xs">
+                      <button
+                        type="button"
+                        onClick={handleCancelEdit}
+                        className="px-2.5 py-1 rounded-md text-slate-500 hover:text-slate-800 dark:hover:text-white font-medium cursor-pointer"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleSaveEdit(msg._id)}
+                        className="px-3 py-1 rounded-md bg-emerald-600 hover:bg-emerald-500 text-white font-bold cursor-pointer transition-colors shadow-xs"
+                      >
+                        Save
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div
+                    className={`px-4 py-2.5 text-sm leading-relaxed break-words transition-all shadow-xs relative ${
+                      isMe
+                        ? "bg-[#3797f0] text-white rounded-[20px] rounded-br-[4px]"
+                        : "bg-[#efefef] dark:bg-[#262626] text-slate-900 dark:text-white rounded-[20px] rounded-bl-[4px]"
+                    }`}
+                  >
+                    {msg.text}
+                  </div>
+                )}
+
+                {/* Grouped Reaction Badges under Bubble */}
+                {groupedReactions.length > 0 && !isEditingThis && (
+                  <div
+                    className={`flex flex-wrap gap-1 mt-1 ${
+                      isMe ? "justify-end" : "justify-start"
+                    }`}
+                  >
+                    {groupedReactions.map(
+                      ({ emoji, count, users, hasReacted }) => (
+                        <button
+                          key={emoji}
+                          type="button"
+                          onClick={() => handleToggleReaction(msg._id, emoji)}
+                          title={`Reacted by: ${users.join(", ")}`}
+                          className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-xs transition-transform hover:scale-110 cursor-pointer shadow-xs ${
+                            hasReacted
+                              ? "bg-emerald-500/15 border border-emerald-500/40 text-emerald-600 dark:text-emerald-400 font-bold"
+                              : "bg-slate-100 dark:bg-[#1a1a1a] border border-slate-200 dark:border-white/10 text-slate-700 dark:text-slate-300"
+                          }`}
+                        >
+                          <span className="text-xs">{emoji}</span>
+                          {count > 1 && (
+                            <span className="text-[10px] font-bold">
+                              {count}
+                            </span>
+                          )}
+                        </button>
+                      )
+                    )}
+                  </div>
+                )}
+
+                {/* Timestamp & Edited Tag */}
                 <div
-                  className={`px-4 py-2.5 text-sm leading-relaxed break-words transition-all shadow-xs ${
-                    isMe
-                      ? "bg-[#3797f0] text-white rounded-[20px] rounded-br-[4px]"
-                      : "bg-[#efefef] dark:bg-[#262626] text-slate-900 dark:text-white rounded-[20px] rounded-bl-[4px]"
+                  className={`flex items-center gap-1 text-[9px] text-slate-400 mt-0.5 opacity-0 group-hover:opacity-100 transition-opacity ${
+                    isMe ? "justify-end mr-1" : "justify-start ml-1"
                   }`}
                 >
-                  {msg.text}
+                  <span>{formatMessageTime(msg.createdAt)}</span>
+                  {msg.isEdited && (
+                    <span className="italic opacity-80 font-medium">· Edited</span>
+                  )}
                 </div>
-                <span
-                  className={`text-[9px] text-slate-400 mt-0.5 opacity-0 group-hover:opacity-100 transition-opacity ${
-                    isMe ? "text-right mr-1" : "text-left ml-1"
-                  }`}
-                >
-                  {formatMessageTime(msg.createdAt)}
-                </span>
               </div>
             </div>
           );

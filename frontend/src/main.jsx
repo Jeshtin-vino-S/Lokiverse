@@ -8,13 +8,18 @@ import './avengers-fx-2.css'
 import App from './App.jsx'
 import { ThemeProvider } from './context/ThemeContext'
 
-// Set backend URL & enable credentials for all axios requests
-if (typeof window !== "undefined" && window.location.hostname !== "localhost") {
-  axios.defaults.baseURL = "";
-} else {
-  axios.defaults.baseURL = "https://lokiverse.onrender.com";
-}
+// Enable credentials and dynamic API baseURL from environment (defaults to relative "" for proxy/same-origin)
+axios.defaults.baseURL = import.meta.env.VITE_API_BASE_URL || "";
 axios.defaults.withCredentials = true;
+
+// Automatically attach Bearer token to all axios requests if available in localStorage
+axios.interceptors.request.use((config) => {
+  const token = typeof window !== "undefined" ? localStorage.getItem("token") : null;
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+});
 
 createRoot(document.getElementById('root')).render(
   <StrictMode>

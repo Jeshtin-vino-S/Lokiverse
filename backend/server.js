@@ -19,21 +19,49 @@ import registerSocketHandlers from './socket/handlers.js';
 dotenv.config();
 
 const port = process.env.PORT || 5000;
-const clientOrigin = process.env.CLIENT_ORIGIN || "http://localhost:3000";
 const app = express();
 const httpServer = http.createServer(app);
 const __dirname = path.resolve();
 
-const allowedOrigins = [
-  clientOrigin,
-  "http://localhost:3000",
-  "http://127.0.0.1:3000",
-  "https://lokiverse.onrender.com",
-];
+// Parse allowed origins dynamically from environment variables
+const parseAllowedOrigins = () => {
+  const origins = new Set();
+
+  if (process.env.CLIENT_ORIGIN) {
+    origins.add(process.env.CLIENT_ORIGIN.trim());
+  }
+
+  if (process.env.ALLOWED_ORIGINS) {
+    process.env.ALLOWED_ORIGINS.split(",")
+      .map((o) => o.trim())
+      .filter(Boolean)
+      .forEach((o) => origins.add(o));
+  }
+
+  // Fallback defaults for local development
+  if (process.env.NODE_ENV !== "production" || origins.size === 0) {
+    origins.add("http://localhost:3000");
+    origins.add("http://127.0.0.1:3000");
+  }
+
+  return Array.from(origins);
+};
+
+const allowedOrigins = parseAllowedOrigins();
+
+// Origin validation helper for CORS & Socket.IO
+const isOriginAllowed = (origin, callback) => {
+  // Allow server-to-server, curl, Postman, mobile, same-origin
+  if (!origin) return callback(null, true);
+  if (allowedOrigins.length === 0 || allowedOrigins.includes(origin)) {
+    return callback(null, true);
+  }
+  return callback(new Error(`CORS blocked for origin: ${origin}`));
+};
 
 // Configure CORS for Express
 app.use(cors({
-  origin: allowedOrigins,
+  origin: isOriginAllowed,
   credentials: true,
 }));
 
@@ -65,7 +93,7 @@ if (process.env.NODE_ENV === "production") {
 // Configure Socket.IO with CORS
 const io = new Server(httpServer, {
   cors: {
-    origin: allowedOrigins,
+    origin: isOriginAllowed,
     methods: ["GET", "POST"],
     credentials: true,
   },
@@ -95,19 +123,16 @@ io.use(async (socket, next) => {
       cookies.jwt;
 
     if (!token) {
-      console.warn("Socket connection rejected: No token provided");
       return next(new Error("Authentication error: No token provided"));
     }
 
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     if (!decoded || !decoded.userId) {
-      console.warn("Socket connection rejected: Invalid token payload");
       return next(new Error("Authentication error: Invalid token"));
     }
 
     const user = await User.findById(decoded.userId).select("-password");
     if (!user) {
-      console.warn("Socket connection rejected: User not found in database");
       return next(new Error("Authentication error: User not found"));
     }
 

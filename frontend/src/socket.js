@@ -7,11 +7,21 @@ export const getAuthToken = () => {
   return "";
 };
 
-// Target backend URL (Render deployed backend)
-const SOCKET_URL =
-  typeof window !== "undefined" && window.location.hostname !== "localhost"
-    ? window.location.origin
-    : "https://lokiverse.onrender.com";
+// Target backend URL: Configurable via environment variable (VITE_BACKEND_URL or VITE_SOCKET_URL)
+// Defaults to current window origin in production, or localhost:5000 during local dev
+const envBackendUrl = import.meta.env.VITE_BACKEND_URL || import.meta.env.VITE_SOCKET_URL;
+const isLocal =
+  typeof window !== "undefined" &&
+  (window.location.hostname === "localhost" ||
+    window.location.hostname === "127.0.0.1");
+
+const defaultUrl = isLocal
+  ? "http://localhost:5000"
+  : typeof window !== "undefined"
+  ? window.location.origin
+  : "";
+
+const SOCKET_URL = envBackendUrl || defaultUrl;
 
 // Shared socket instance with credentials and dynamic auth
 export const socket = io(SOCKET_URL, {

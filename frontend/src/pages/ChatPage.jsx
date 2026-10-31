@@ -23,6 +23,67 @@ const ChatPage = ({ authUser: initialAuthUser, onLogoutSuccess }) => {
   const [modalSearch, setModalSearch] = useState("");
   const [modalResults, setModalResults] = useState([]);
   const [modalLoading, setModalLoading] = useState(false);
+  const [unreadByRoom, setUnreadByRoom] = useState({});
+
+  // Fetch unread messages per room breakdown
+  const fetchUnreadCounts = async () => {
+    try {
+      const res = await axios.get("/api/messages/unread-count");
+      if (res.data?.unreadByRoom) {
+        setUnreadByRoom(res.data.unreadByRoom);
+      }
+    } catch {
+      // silent
+    }
+  };
+
+  useEffect(() => {
+    fetchUnreadCounts();
+
+    const handleNewMessageAlert = (data) => {
+      if (data?.roomId) {
+        setUnreadByRoom((prev) => ({
+          ...prev,
+          [data.roomId]: (prev[data.roomId] || 0) + 1,
+        }));
+      }
+    };
+
+    const handleMessagesRead = (data) => {
+      if (data?.roomId) {
+        setUnreadByRoom((prev) => {
+          const next = { ...prev };
+          delete next[data.roomId];
+          return next;
+        });
+      } else {
+        fetchUnreadCounts();
+      }
+    };
+
+    socket.on("connect", fetchUnreadCounts);
+    socket.on("new_message_notification", handleNewMessageAlert);
+    socket.on("receive_message", (savedMessage) => {
+      if (savedMessage?.roomId && savedMessage.sender !== authUser?.username) {
+        if (savedMessage.roomId !== activeRoomId) {
+          setUnreadByRoom((prev) => ({
+            ...prev,
+            [savedMessage.roomId]: (prev[savedMessage.roomId] || 0) + 1,
+          }));
+        }
+      }
+    });
+    socket.on("messages_read_confirmed", handleMessagesRead);
+    window.addEventListener("messageCountUpdated", fetchUnreadCounts);
+
+    return () => {
+      socket.off("connect", fetchUnreadCounts);
+      socket.off("new_message_notification", handleNewMessageAlert);
+      socket.off("receive_message");
+      socket.off("messages_read_confirmed", handleMessagesRead);
+      window.removeEventListener("messageCountUpdated", fetchUnreadCounts);
+    };
+  }, [authUser, activeRoomId]);
 
   // Track online users list and real-time last seen updates
   useEffect(() => {
@@ -361,6 +422,15 @@ const ChatPage = ({ authUser: initialAuthUser, onLogoutSuccess }) => {
                           ) : null}
                         </span>
                       </div>
+
+                      {/* Unread Message Count Badge for this Ally */}
+                      {unreadByRoom[dmId] > 0 && !isSelected && (
+                        <div className="shrink-0 flex items-center justify-center">
+                          <span className="min-w-[20px] h-[20px] px-1.5 rounded-full bg-gradient-to-r from-emerald-500 to-teal-500 text-white text-[11px] font-black flex items-center justify-center shadow-sm shadow-emerald-500/30 animate-pulse">
+                            {unreadByRoom[dmId] > 99 ? "99+" : unreadByRoom[dmId]}
+                          </span>
+                        </div>
+                      )}
                     </button>
                   );
                 })

@@ -3,6 +3,7 @@ import { Link, useNavigate, useLocation } from "react-router-dom";
 import axios from "axios";
 import { fireArrow } from "../heroFx2";
 import { useTheme } from "../context/ThemeContext";
+import socket from "../socket";
 
 const Sidebar = ({ activeTab = "profile", authUser: initialAuthUser, onLogoutSuccess, onSearchClick }) => {
   const navigate = useNavigate();
@@ -10,6 +11,7 @@ const Sidebar = ({ activeTab = "profile", authUser: initialAuthUser, onLogoutSuc
   const { isDark, toggleTheme } = useTheme();
   const [currentUser, setCurrentUser] = useState(initialAuthUser || null);
   const [unreadCount, setUnreadCount] = useState(0);
+  const [unreadMessageCount, setUnreadMessageCount] = useState(0);
   const [logoutLoading, setLogoutLoading] = useState(false);
   const [showSearchModal, setShowSearchModal] = useState(false);
   const [modalSearchQuery, setModalSearchQuery] = useState("");
@@ -92,6 +94,53 @@ const Sidebar = ({ activeTab = "profile", authUser: initialAuthUser, onLogoutSuc
       }
     }
   }, [unreadCount]);
+
+  // Fetch unread messages count (distinct users who messaged)
+  const fetchUnreadMessageCount = async () => {
+    try {
+      const res = await axios.get("/api/messages/unread-count");
+      if (res.data && typeof res.data.unreadUserCount === "number") {
+        setUnreadMessageCount(res.data.unreadUserCount);
+      } else if (res.data && typeof res.data.unreadCount === "number") {
+        setUnreadMessageCount(res.data.unreadCount);
+      }
+    } catch {
+      // silent
+    }
+  };
+
+  useEffect(() => {
+    fetchUnreadMessageCount();
+
+    const handleNewMessageAlert = (data) => {
+      // Re-fetch to get accurate distinct user count
+      fetchUnreadMessageCount();
+    };
+
+    const handleGeneralReceiveMessage = (savedMessage) => {
+      if (savedMessage && currentUser?.username && savedMessage.sender !== currentUser.username) {
+        fetchUnreadMessageCount();
+      }
+    };
+
+    const handleMessagesRead = () => {
+      fetchUnreadMessageCount();
+    };
+
+    socket.on("connect", fetchUnreadMessageCount);
+    socket.on("new_message_notification", handleNewMessageAlert);
+    socket.on("receive_message", handleGeneralReceiveMessage);
+    socket.on("messages_read_confirmed", handleMessagesRead);
+    window.addEventListener("messageCountUpdated", handleMessagesRead);
+
+    return () => {
+      socket.off("connect", fetchUnreadMessageCount);
+      socket.off("new_message_notification", handleNewMessageAlert);
+      socket.off("receive_message", handleGeneralReceiveMessage);
+      socket.off("messages_read_confirmed", handleMessagesRead);
+      window.removeEventListener("messageCountUpdated", handleMessagesRead);
+    };
+  }, [currentUser]);
 
   const handleLogout = async () => {
     setLogoutLoading(true);
@@ -208,15 +257,22 @@ const Sidebar = ({ activeTab = "profile", authUser: initialAuthUser, onLogoutSuc
           {/* Live Chat */}
           <Link
             to="/chat"
-            className={`flex flex-col items-center justify-center p-2 rounded-xl transition-all cursor-pointer ${
+            className={`flex flex-col items-center justify-center p-2 rounded-xl transition-all cursor-pointer relative ${
               activeTab === "chat"
                 ? "text-emerald-600 dark:text-emerald-400 font-bold"
                 : "text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white"
             }`}
           >
-            <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor">
-              <path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H5.17L4 17.17V4h16v12z" />
-            </svg>
+            <div className="relative">
+              <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor">
+                <path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H5.17L4 17.17V4h16v12z" />
+              </svg>
+              {unreadMessageCount > 0 && (
+                <span className="absolute -top-1 -right-1.5 min-w-[16px] h-[16px] px-1 rounded-full bg-gradient-to-r from-emerald-500 to-teal-500 text-[9px] font-black text-white flex items-center justify-center animate-pulse shadow-sm">
+                  {unreadMessageCount > 99 ? "99+" : unreadMessageCount}
+                </span>
+              )}
+            </div>
             <span className="text-[10px] mt-0.5">Chat</span>
           </Link>
 
@@ -329,19 +385,34 @@ const Sidebar = ({ activeTab = "profile", authUser: initialAuthUser, onLogoutSuc
               <span className="hidden xl:inline font-semibold text-base">Search Agents</span>
             </button>
 
-            {/* Live Chat */}
+            {/* Live Chat with Dynamic Badge Count */}
             <Link
               to="/chat"
-              className={`flex items-center gap-4 p-3 rounded-xl transition-all text-left cursor-pointer fx-ant-hover ${
+              className={`flex items-center gap-4 p-3 rounded-xl transition-all text-left cursor-pointer relative group fx-ant-hover ${
                 activeTab === "chat"
                   ? "text-emerald-700 dark:text-emerald-400 bg-emerald-500/15 border border-emerald-500/30 font-bold shadow-sm shadow-emerald-500/10"
                   : "text-slate-600 hover:text-slate-900 hover:bg-slate-100 dark:text-slate-400 dark:hover:text-white dark:hover:bg-white/5"
               }`}
             >
-              <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor">
-                <path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H5.17L4 17.17V4h16v12z" />
-              </svg>
-              <span className="hidden xl:inline font-semibold text-base">Live Chat</span>
+              <div className="relative flex items-center justify-center">
+                <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor">
+                  <path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H5.17L4 17.17V4h16v12z" />
+                </svg>
+                {unreadMessageCount > 0 && (
+                  <span className="xl:hidden absolute -top-1.5 -right-2 min-w-[18px] h-[18px] px-1 rounded-full bg-gradient-to-r from-emerald-500 to-teal-500 text-[10px] font-black text-white flex items-center justify-center shadow-lg shadow-emerald-500/40 animate-pulse border border-white dark:border-[#07080c]">
+                    {unreadMessageCount > 99 ? "99+" : unreadMessageCount}
+                  </span>
+                )}
+              </div>
+
+              <div className="hidden xl:flex items-center justify-between flex-1">
+                <span className="font-semibold text-base">Live Chat</span>
+                {unreadMessageCount > 0 && (
+                  <span className="inline-flex items-center justify-center min-w-[22px] h-[22px] px-1.5 rounded-full bg-gradient-to-r from-emerald-500 to-teal-500 text-white text-xs font-black shadow-md shadow-emerald-500/40 animate-pulse border border-emerald-400/30">
+                    {unreadMessageCount > 99 ? "99+" : unreadMessageCount}
+                  </span>
+                )}
+              </div>
             </Link>
 
             {/* Transmissions (Notifications) with Dynamic Badge Count & Hawkeye Arrow */}

@@ -15,9 +15,14 @@ export const registerSocketHandlers = (io) => {
       }
       onlineUsersMap.get(userId).add(socket.id);
 
+      // Join the user's personal private room for direct notification alerts
+      socket.join(userId);
+      if (socket.user?.username) {
+        socket.join(socket.user.username);
+      }
+
       // Broadcast list of active user IDs across the website
       io.emit("get_online_users", Array.from(onlineUsersMap.keys()));
-      console.log(`User online: @${socket.user?.username} (${userId}). Total online: ${onlineUsersMap.size}`);
     }
 
     // Client can request current online users at any time
@@ -35,7 +40,6 @@ export const registerSocketHandlers = (io) => {
         return socket.emit("message_error", { error: "Room ID cannot be empty" });
       }
       socket.join(cleanRoomId);
-      console.log(`Socket ${socket.id} (@${socket.user?.username}) joined room: ${cleanRoomId}`);
     });
 
     // send_message event: validates input, saves to MongoDB first, then broadcasts to room
@@ -91,13 +95,144 @@ export const registerSocketHandlers = (io) => {
 
         // 2. Emit to clients in the room second
         io.to(cleanRoomId).emit("receive_message", savedMessage);
-        console.log(`Message saved & sent to room [${cleanRoomId}] by @${sender}: ${trimmedText}`);
+
+        // 3. If 1-to-1 chat, notify recipient socket directly for live unread badge updates
+        if (cleanRoomId.includes("_")) {
+          const parts = cleanRoomId.split("_");
+          const recipientId = parts.find((id) => id !== userId);
+          if (recipientId) {
+            io.to(recipientId).emit("new_message_notification", {
+              message: savedMessage,
+              roomId: cleanRoomId,
+            });
+          }
+        }
       } catch (error) {
         console.error("Socket send_message error:", error);
         // On a save failure, emit message_error to sender only
         socket.emit("message_error", {
           error: "Failed to send message: " + (error.message || "Database error"),
         });
+      }
+    });
+
+    // mark_messages_read event: marks messages in a room as read for the current user
+    socket.on("mark_messages_read", async (data) => {
+      try {
+        const roomId = data?.roomId;
+        if (!roomId || !socket.user?.username) return;
+
+        await Message.updateMany(
+          {
+            roomId: roomId.trim(),
+            sender: { $ne: socket.user.username },
+            read: { $ne: true },
+          },
+          { $set: { read: true } }
+        );
+
+        if (userId) {
+          socket.emit("messages_read_confirmed", { roomId: roomId.trim() });
+        }
+      } catch (err) {
+        console.error("Error in socket mark_messages_read:", err);
+      }
+    });
+
+    // unsend_message event: deletes message from MongoDB and emits to room
+    socket.on("unsend_message", async (data) => {
+      try {
+        const { messageId, roomId } = data || {};
+        if (!messageId || !socket.user?.username) return;
+
+        const message = await Message.findById(messageId);
+        if (!message) return;
+
+        if (message.sender !== socket.user.username) {
+          return socket.emit("message_error", { error: "You can only unsend your own messages" });
+        }
+
+        // Delete from DB
+        await Message.findByIdAndDelete(messageId);
+
+        const targetRoom = (roomId || message.roomId)?.trim();
+        io.to(targetRoom).emit("message_unsent", { messageId, roomId: targetRoom });
+      } catch (err) {
+        console.error("Error in socket unsend_message:", err);
+      }
+    });
+
+    // edit_message event: updates text in DB and emits to room
+    socket.on("edit_message", async (data) => {
+      try {
+        const { messageId, roomId, text } = data || {};
+        if (!messageId || !text || typeof text !== "string" || !text.trim() || !socket.user?.username) return;
+
+        const message = await Message.findById(messageId);
+        if (!message) return;
+
+        if (message.sender !== socket.user.username) {
+          return socket.emit("message_error", { error: "You can only edit your own messages" });
+        }
+
+        // 5-minute limit check: Messages can only be edited within 5 minutes of sending
+        const EDIT_WINDOW_MS = 5 * 60 * 1000;
+        const messageAge = Date.now() - new Date(message.createdAt).getTime();
+        if (messageAge > EDIT_WINDOW_MS) {
+          return socket.emit("message_error", {
+            error: "Messages can only be edited within 5 minutes of sending",
+          });
+        }
+
+        message.text = text.trim();
+        message.isEdited = true;
+        const updated = await message.save();
+
+        const targetRoom = (roomId || message.roomId)?.trim();
+        io.to(targetRoom).emit("message_edited", updated);
+      } catch (err) {
+        console.error("Error in socket edit_message:", err);
+      }
+    });
+
+    // react_message event: toggles reaction in DB and emits to room
+    socket.on("react_message", async (data) => {
+      try {
+        const { messageId, roomId, emoji } = data || {};
+        if (!messageId || !emoji || !socket.user?.username) return;
+
+        const message = await Message.findById(messageId);
+        if (!message) return;
+
+        if (!Array.isArray(message.reactions)) {
+          message.reactions = [];
+        }
+
+        const username = socket.user.username;
+        const existingIndex = message.reactions.findIndex((r) => r.user === username);
+
+        if (existingIndex > -1) {
+          if (message.reactions[existingIndex].emoji === emoji) {
+            // Toggle off
+            message.reactions.splice(existingIndex, 1);
+          } else {
+            // Update to new emoji
+            message.reactions[existingIndex].emoji = emoji;
+          }
+        } else {
+          message.reactions.push({ user: username, emoji });
+        }
+
+        await message.save();
+
+        const targetRoom = (roomId || message.roomId)?.trim();
+        io.to(targetRoom).emit("message_reaction_updated", {
+          messageId: message._id,
+          roomId: targetRoom,
+          reactions: message.reactions,
+        });
+      } catch (err) {
+        console.error("Error in socket react_message:", err);
       }
     });
 
@@ -113,7 +248,6 @@ export const registerSocketHandlers = (io) => {
           io.emit("user_last_seen", { userId, lastSeen: now.toISOString() });
         }
         io.emit("get_online_users", Array.from(onlineUsersMap.keys()));
-        console.log(`Socket disconnected: ${socket.id} (@${socket.user?.username}). Total online: ${onlineUsersMap.size}`);
       }
     });
   });

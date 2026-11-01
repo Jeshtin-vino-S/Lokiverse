@@ -32,7 +32,6 @@ app.use(cors({
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(CookieParser());
-app.use("/uploads", express.static("uploads"));
 
 // REST Routes
 app.use("/auth", authRoute);
@@ -47,7 +46,7 @@ if (process.env.NODE_ENV === "production") {
 
   app.use((req, res, next) => {
     // Only handle GET requests for frontend SPA routing; let API routes pass through
-    if (req.method === "GET" && !req.path.startsWith("/api") && !req.path.startsWith("/auth") && !req.path.startsWith("/uploads")) {
+    if (req.method === "GET" && !req.path.startsWith("/api") && !req.path.startsWith("/auth")) {
       return res.sendFile(path.resolve(__dirname, "frontend", "dist", "index.html"));
     }
     next();

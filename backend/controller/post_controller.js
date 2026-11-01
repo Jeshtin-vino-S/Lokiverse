@@ -1,22 +1,8 @@
-import fs from "fs";
-import path from "path";
 import User from "../models/user_model.js";
 import Posts from "../models/post_schema.js";
 import Notification from "../models/notification_model.js";
-
-// Helper to remove local uploaded files from disk safely
-const deleteLocalFile = (filePath) => {
-    if (!filePath || typeof filePath !== "string") return;
-    const normalized = filePath.startsWith("/") ? filePath.slice(1) : filePath;
-    if (normalized.startsWith("uploads") && fs.existsSync(normalized)) {
-        try {
-            fs.unlinkSync(normalized);
-            console.log(`Deleted file from uploads: ${normalized}`);
-        } catch (err) {
-            console.log("Failed to delete local file:", err);
-        }
-    }
-};
+import { fileToDataUrl } from "../middleware/multer.js";
+import { uploadToCloudinary, deleteFromCloudinary } from "../utils/cloudinary.js";
 
 export const createPost = async (req, res) => {
     try {
@@ -33,28 +19,18 @@ export const createPost = async (req, res) => {
         // 1. Check for file uploaded via Multer (multipart/form-data)
         const uploadedFile = req.file || (req.files?.img && req.files.img[0]) || (req.files?.image && req.files.image[0]);
         if (uploadedFile) {
-            img = `/uploads/${uploadedFile.filename}`;
+            const dataUri = fileToDataUrl(uploadedFile);
+            img = await uploadToCloudinary(dataUri, "lokiverse/posts");
         }
         // 2. Check for base64 or URL passed in req.body
         else if (req.body.img || req.body.image) {
             const rawImg = req.body.img || req.body.image;
-            if (typeof rawImg === "string" && rawImg.startsWith("data:image/")) {
-                // Parse base64 and write to uploads/
-                const matches = rawImg.match(/^data:image\/([a-zA-Z0-9+]+);base64,(.+)$/);
-                if (matches) {
-                    const ext = matches[1] === "jpeg" ? "jpg" : matches[1];
-                    const base64Data = matches[2];
-                    const fileName = `img-${Date.now()}-${Math.round(Math.random() * 1e9)}.${ext}`;
-                    const uploadDir = "uploads";
-                    if (!fs.existsSync(uploadDir)) {
-                        fs.mkdirSync(uploadDir, { recursive: true });
-                    }
-                    const filePath = path.join(uploadDir, fileName);
-                    fs.writeFileSync(filePath, Buffer.from(base64Data, "base64"));
-                    img = `/uploads/${fileName}`;
+            if (typeof rawImg === "string" && rawImg.trim() !== "") {
+                if (rawImg.startsWith("data:image/")) {
+                    img = await uploadToCloudinary(rawImg.trim(), "lokiverse/posts");
+                } else {
+                    img = rawImg.trim();
                 }
-            } else if (typeof rawImg === "string" && rawImg.trim() !== "") {
-                img = rawImg.trim();
             }
         }
 
@@ -77,8 +53,8 @@ export const createPost = async (req, res) => {
 
         return res.status(201).json(newPost);
     } catch (error) {
-        console.log(`error in create post : ${error}`);
-        return res.status(500).json({ error: "Internal server error" });
+        console.error("error in create post :", error?.message || error);
+        return res.status(500).json({ error: error?.message || "Internal server error" });
     }
 };
 
@@ -175,9 +151,9 @@ export const deletePost = async (req, res) => {
             return res.status(401).json({ error: "You are not authorized to delete this post" });
         }
 
-        // Delete post image file from disk if it exists
+        // Delete post image from Cloudinary if it exists
         if (post.img) {
-            deleteLocalFile(post.img);
+            await deleteFromCloudinary(post.img);
         }
 
         await Posts.findByIdAndDelete(id);

@@ -1,7 +1,8 @@
 import User from "../models/user_model.js";
 import Notification from "../models/notification_model.js";
 import bcrypt from "bcryptjs";
-import fs from "fs";
+import { fileToDataUrl } from "../middleware/multer.js";
+import { uploadToCloudinary, deleteFromCloudinary } from "../utils/cloudinary.js";
 
 export const getProfile = async (req, res) => {
     try {
@@ -125,22 +126,14 @@ export const updateUser = async (req, res) => {
             user.password = await bcrypt.hash(newPassword, salt);
         }
 
-        // Helper to remove old local files from disk
-        const deleteOldFile = (filePath) => {
-            if (!filePath) return;
-            const normalized = filePath.startsWith("/") ? filePath.slice(1) : filePath;
-            if (normalized.startsWith("uploads") && fs.existsSync(normalized)) {
-                fs.unlink(normalized, (err) => {
-                    if (err) console.log("Failed to delete old file:", err);
-                });
-            }
-        };
-
         // --- PROFILE IMAGE: UPLOAD OR REMOVE ---
         // 1. Uploaded via Multer file
         if (req.files && req.files.profileImg && req.files.profileImg[0]) {
-            deleteOldFile(user.profileImg);
-            user.profileImg = `/uploads/${req.files.profileImg[0].filename}`;
+            if (user.profileImg) {
+                await deleteFromCloudinary(user.profileImg);
+            }
+            const dataUri = fileToDataUrl(req.files.profileImg[0]);
+            user.profileImg = await uploadToCloudinary(dataUri, "lokiverse/avatars");
         }
         // 2. Remove profile image (empty string, null, or removeProfileImg: true)
         else if (
@@ -150,19 +143,29 @@ export const updateUser = async (req, res) => {
             req.body.removeProfileImg === "true" ||
             req.body.removeProfileImg === true
         ) {
-            deleteOldFile(user.profileImg);
+            if (user.profileImg) {
+                await deleteFromCloudinary(user.profileImg);
+            }
             user.profileImg = "";
         }
-        // 3. String URL provided in body
+        // 3. String URL or Base64 provided in body
         else if (profileImg && typeof profileImg === "string") {
-            user.profileImg = profileImg;
+            if (profileImg.startsWith("data:image/")) {
+                if (user.profileImg) await deleteFromCloudinary(user.profileImg);
+                user.profileImg = await uploadToCloudinary(profileImg, "lokiverse/avatars");
+            } else {
+                user.profileImg = profileImg;
+            }
         }
 
         // --- COVER IMAGE: UPLOAD OR REMOVE ---
         // 1. Uploaded via Multer file
         if (req.files && req.files.coverImg && req.files.coverImg[0]) {
-            deleteOldFile(user.coverImg);
-            user.coverImg = `/uploads/${req.files.coverImg[0].filename}`;
+            if (user.coverImg) {
+                await deleteFromCloudinary(user.coverImg);
+            }
+            const dataUri = fileToDataUrl(req.files.coverImg[0]);
+            user.coverImg = await uploadToCloudinary(dataUri, "lokiverse/covers");
         }
         // 2. Remove cover image (empty string, null, or removeCoverImg: true)
         else if (
@@ -172,12 +175,19 @@ export const updateUser = async (req, res) => {
             req.body.removeCoverImg === "true" ||
             req.body.removeCoverImg === true
         ) {
-            deleteOldFile(user.coverImg);
+            if (user.coverImg) {
+                await deleteFromCloudinary(user.coverImg);
+            }
             user.coverImg = "";
         }
-        // 3. String URL provided in body
+        // 3. String URL or Base64 provided in body
         else if (coverImg && typeof coverImg === "string") {
-            user.coverImg = coverImg;
+            if (coverImg.startsWith("data:image/")) {
+                if (user.coverImg) await deleteFromCloudinary(user.coverImg);
+                user.coverImg = await uploadToCloudinary(coverImg, "lokiverse/covers");
+            } else {
+                user.coverImg = coverImg;
+            }
         }
 
         // Update other text fields
@@ -192,8 +202,8 @@ export const updateUser = async (req, res) => {
         user.password = null;
         return res.status(200).json(user);
     } catch (error) {
-        console.log(`error in update user : ${error}`);
-        res.status(500).json({ error: "Internal server error" });
+        console.error("error in update user :", error?.message || error);
+        res.status(500).json({ error: error?.message || "Internal server error" });
     }
 };
 

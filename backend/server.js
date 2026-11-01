@@ -1,10 +1,10 @@
+import 'dotenv/config';
 import express from 'express';
 import http from 'http';
 import path from 'path';
 import cors from 'cors';
 import { Server } from 'socket.io';
 import jwt from 'jsonwebtoken';
-import dotenv from 'dotenv';
 import CookieParser from 'cookie-parser';
 
 import authRoute from './routes/auth_routes.js';
@@ -15,8 +15,6 @@ import messageRoute from './routes/message_routes.js';
 import connecDB from './db/connectDB.js';
 import User from './models/user_model.js';
 import registerSocketHandlers from './socket/handlers.js';
-
-dotenv.config();
 
 const port = process.env.PORT || 5000;
 const app = express();

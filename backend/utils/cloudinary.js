@@ -1,10 +1,14 @@
 import { v2 as cloudinary } from "cloudinary";
 
-cloudinary.config({
-  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-  api_key: process.env.CLOUDINARY_API_KEY,
-  api_secret: process.env.CLOUDINARY_API_SECRET,
-});
+// Ensure cloudinary is always configured with the latest environment variables
+const configureCloudinary = () => {
+  cloudinary.config({
+    cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+    api_key: process.env.CLOUDINARY_API_KEY,
+    api_secret: process.env.CLOUDINARY_API_SECRET,
+  });
+  return cloudinary;
+};
 
 /**
  * Upload an image to Cloudinary (supports base64 data URI or image URL)
@@ -14,8 +18,9 @@ cloudinary.config({
  */
 export const uploadToCloudinary = async (fileStr, folder = "lokiverse") => {
   if (!fileStr || typeof fileStr !== "string") return "";
+  const client = configureCloudinary();
   try {
-    const result = await cloudinary.uploader.upload(fileStr, {
+    const result = await client.uploader.upload(fileStr, {
       folder,
       resource_type: "auto",
     });
@@ -32,15 +37,24 @@ export const uploadToCloudinary = async (fileStr, folder = "lokiverse") => {
  */
 export const deleteFromCloudinary = async (url) => {
   if (!url || typeof url !== "string" || !url.includes("cloudinary.com")) return;
+  const client = configureCloudinary();
   try {
-    const parts = url.split("/");
-    const filenameWithExt = parts[parts.length - 1];
-    const filename = filenameWithExt.split(".")[0];
-    const folder = parts[parts.length - 2];
-    const publicId = `${folder}/${filename}`;
-    await cloudinary.uploader.destroy(publicId);
+    const uploadIndex = url.indexOf("/upload/");
+    if (uploadIndex === -1) return;
+
+    // Extract complete public_id including nested folders (e.g. "lokiverse/posts/xyz")
+    const afterUpload = url.substring(uploadIndex + 8);
+    const withoutVersion = afterUpload.replace(/^v\d+\//, "");
+    const lastDotIndex = withoutVersion.lastIndexOf(".");
+    const publicId = lastDotIndex !== -1 ? withoutVersion.substring(0, lastDotIndex) : withoutVersion;
+
+    if (!publicId) return;
+
+    const result = await client.uploader.destroy(publicId);
+    console.log(`Cloudinary destroyed [${publicId}]:`, result?.result);
+    return result;
   } catch (err) {
-    console.error("Cloudinary delete error:", err);
+    console.error("Cloudinary delete error:", err?.message || err);
   }
 };
 

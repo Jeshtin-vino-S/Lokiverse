@@ -49,7 +49,7 @@ export const registerSocketHandlers = (io) => {
           return socket.emit("message_error", { error: "Invalid message payload" });
         }
 
-        const { roomId, text } = data;
+        const { roomId, text, postId, post } = data;
 
         // Input validation: roomId present
         if (!roomId || typeof roomId !== "string" || !roomId.trim()) {
@@ -89,9 +89,17 @@ export const registerSocketHandlers = (io) => {
           roomId: cleanRoomId,
           sender,
           text: trimmedText,
+          post: postId || post || null,
         });
 
         const savedMessage = await newMessage.save();
+
+        if (newMessage.post) {
+          await savedMessage.populate({
+            path: "post",
+            populate: { path: "user", select: "username fullname profileImg bio" },
+          });
+        }
 
         // 2. Emit to clients in the room second
         io.to(cleanRoomId).emit("receive_message", savedMessage);

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import axios from "axios";
 import socket, { connectSocket } from "../socket";
 import { formatLastActive } from "../utils/formatTime";
@@ -12,6 +12,7 @@ import { formatLastActive } from "../utils/formatTime";
  * @param {function} onBack - Callback for mobile back button to conversation list
  */
 const Chat = ({ roomId, username, recipientUser, onBack }) => {
+  const navigate = useNavigate();
   const [messages, setMessages] = useState([]);
   const [inputText, setInputText] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
@@ -738,14 +739,100 @@ const Chat = ({ roomId, username, recipientUser, onBack }) => {
                     </div>
                   </div>
                 ) : (
-                  <div
-                    className={`px-4 py-2.5 text-sm leading-relaxed break-words transition-all shadow-xs relative ${
-                      isMe
-                        ? "bg-[#3797f0] text-white rounded-[20px] rounded-br-[4px]"
-                        : "bg-[#efefef] dark:bg-[#262626] text-slate-900 dark:text-white rounded-[20px] rounded-bl-[4px]"
-                    }`}
-                  >
-                    {msg.text}
+                  <div className={`flex flex-col gap-1.5 ${isMe ? "items-end" : "items-start"}`}>
+                    {/* Instagram-Style Embedded Shared Post Card */}
+                    {msg.post && (
+                      <div
+                        onClick={() => {
+                          if (msg.post.user?.username) {
+                            navigate(`/profile/${msg.post.user.username}`);
+                          }
+                        }}
+                        className="w-60 sm:w-72 rounded-2xl overflow-hidden bg-white dark:bg-[#1a1b24] border border-slate-200 dark:border-white/15 shadow-md hover:border-emerald-500/50 transition-all cursor-pointer group text-left"
+                      >
+                        {/* Author Header */}
+                        <div className="flex items-center gap-2 p-2.5 border-b border-slate-100 dark:border-white/5 bg-slate-50/80 dark:bg-black/30">
+                          <div className="w-6 h-6 rounded-full bg-gradient-to-tr from-emerald-600 via-teal-600 to-amber-500 p-0.5 overflow-hidden shrink-0">
+                            {msg.post.user?.profileImg ? (
+                              <img
+                                src={msg.post.user.profileImg}
+                                alt={msg.post.user.username}
+                                className="w-full h-full rounded-full object-cover"
+                              />
+                            ) : (
+                              <div className="w-full h-full rounded-full bg-slate-800 text-[8px] font-black text-amber-300 flex items-center justify-center">
+                                {msg.post.user?.username?.slice(0, 2).toUpperCase() || "AV"}
+                              </div>
+                            )}
+                          </div>
+                          <div className="flex flex-col min-w-0">
+                            <span className="text-xs font-bold text-slate-900 dark:text-white truncate">
+                              {msg.post.user?.fullname || msg.post.user?.username}
+                            </span>
+                            <span className="text-[10px] text-slate-400 font-mono truncate">
+                              @{msg.post.user?.username}
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Media Preview (Image or Video) */}
+                        {msg.post.img && (
+                          <div className="w-full aspect-square max-h-60 bg-black overflow-hidden flex items-center justify-center">
+                            <img
+                              src={msg.post.img}
+                              alt="Post media"
+                              className="w-full h-full object-cover group-hover:scale-102 transition-transform duration-300"
+                            />
+                          </div>
+                        )}
+
+                        {msg.post.video && (
+                          <div
+                            className="w-full aspect-video max-h-60 bg-black overflow-hidden flex items-center justify-center"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <video
+                              src={msg.post.video}
+                              controls
+                              playsInline
+                              preload="metadata"
+                              className="w-full h-full object-contain"
+                            />
+                          </div>
+                        )}
+
+                        {/* Post Caption Snippet */}
+                        {msg.post.text && (
+                          <div className="p-2.5 text-xs text-slate-800 dark:text-slate-200 line-clamp-3 leading-relaxed break-words">
+                            <span className="font-bold mr-1 text-slate-900 dark:text-white">
+                              @{msg.post.user?.username}
+                            </span>
+                            {msg.post.text}
+                          </div>
+                        )}
+
+                        {/* View Post Footer */}
+                        <div className="px-3 py-1.5 bg-slate-50 dark:bg-black/40 border-t border-slate-100 dark:border-white/5 flex items-center justify-between text-[11px] text-emerald-600 dark:text-emerald-400 font-bold group-hover:text-emerald-500">
+                          <span>View Transmission</span>
+                          <svg viewBox="0 0 20 20" fill="currentColor" className="w-3.5 h-3.5 group-hover:translate-x-0.5 transition-transform">
+                            <path fillRule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clipRule="evenodd" />
+                          </svg>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Regular Message Text / Note (Only if text is non-empty) */}
+                    {msg.text && (
+                      <div
+                        className={`px-4 py-2.5 text-sm leading-relaxed break-words transition-all shadow-xs relative ${
+                          isMe
+                            ? "bg-[#3797f0] text-white rounded-[20px] rounded-br-[4px]"
+                            : "bg-[#efefef] dark:bg-[#262626] text-slate-900 dark:text-white rounded-[20px] rounded-bl-[4px]"
+                        }`}
+                      >
+                        {msg.text}
+                      </div>
+                    )}
                   </div>
                 )}
 

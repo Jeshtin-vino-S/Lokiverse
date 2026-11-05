@@ -56,36 +56,12 @@ const SharePostModal = ({ post, currentUser, onClose }) => {
     setSendingMap((prev) => ({ ...prev, [recipientId]: true }));
 
     try {
-      // 1. Send via HTTP endpoint to persist in DB
+      // Send via HTTP endpoint: saves to MongoDB and broadcasts via Socket.IO
       await axios.post("/api/messages/share-post", {
         recipientId,
         postId: post._id,
         messageText: noteText.trim(),
       });
-
-      // 2. Also emit via socket.io for instant real-time delivery
-      const roomId = [currentUser?._id?.toString(), recipientId.toString()]
-        .sort()
-        .join("_");
-
-      const postSnippet = post.text
-        ? post.text.length > 80
-          ? post.text.slice(0, 80) + "..."
-          : post.text
-        : post.img
-        ? "[Image Intel]"
-        : "[Video Transmission]";
-
-      const text = noteText.trim()
-        ? `${noteText.trim()}\n\n⚡ Shared Transmission from @${post.user?.username || "agent"}:\n"${postSnippet}"`
-        : `⚡ Shared Transmission from @${post.user?.username || "agent"}:\n"${postSnippet}"`;
-
-      if (socket && socket.connected) {
-        socket.emit("send_message", {
-          roomId,
-          text,
-        });
-      }
 
       setSentMap((prev) => ({ ...prev, [recipientId]: true }));
     } catch (err) {

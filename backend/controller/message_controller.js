@@ -30,6 +30,13 @@ export const getMessageHistory = async (req, res) => {
     const messages = await Message.find(query)
       .sort({ createdAt: -1 })
       .limit(limit)
+      .populate({
+        path: "post",
+        populate: {
+          path: "user",
+          select: "username fullname profileImg bio",
+        },
+      })
       .lean();
 
     const chronologicalMessages = messages.reverse();
@@ -328,22 +335,23 @@ export const sharePostToUser = async (req, res) => {
     // Construct direct message room ID
     const cleanRoomId = [senderId, recipientId.toString()].sort().join("_");
 
-    // Format Instagram-like transmission intel preview
-    const postSnippet = post.text
-      ? (post.text.length > 80 ? post.text.slice(0, 80) + "..." : post.text)
-      : (post.img ? "[Image Intel]" : "[Video Transmission]");
-
-    const formattedText = messageText && messageText.trim()
-      ? `${messageText.trim()}\n\n⚡ Shared Transmission from @${post.user?.username || "agent"}:\n"${postSnippet}"`
-      : `⚡ Shared Transmission from @${post.user?.username || "agent"}:\n"${postSnippet}"`;
-
     const newMessage = new Message({
       roomId: cleanRoomId,
       sender: senderUsername,
-      text: formattedText,
+      text: messageText ? messageText.trim() : "",
+      post: post._id,
     });
 
     const savedMessage = await newMessage.save();
+
+    // Populate post before emitting to clients
+    await savedMessage.populate({
+      path: "post",
+      populate: {
+        path: "user",
+        select: "username fullname profileImg bio",
+      },
+    });
 
     // Broadcast via socket.io if available
     const io = req.app.get("io");

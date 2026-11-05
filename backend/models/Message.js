@@ -12,7 +12,12 @@ const messageSchema = new mongoose.Schema(
     },
     text: {
       type: String,
-      required: true,
+      default: "",
+    },
+    post: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Posts",
+      default: null,
     },
     read: {
       type: Boolean,

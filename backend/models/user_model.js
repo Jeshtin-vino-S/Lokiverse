@@ -47,6 +47,11 @@ const userSchema = mongoose.Schema({
         type : String,
         default : ""
     },
+    savedPosts: [{
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "Posts",
+        default: []
+    }],
     lastSeen : {
         type : Date,
         default : Date.now

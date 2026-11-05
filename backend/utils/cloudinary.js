@@ -32,15 +32,45 @@ export const uploadToCloudinary = async (fileStr, folder = "lokiverse") => {
 };
 
 /**
- * Delete an image from Cloudinary using its secure URL
- * @param {string} url - Cloudinary secure URL
+ * Upload a video to Cloudinary with duration & resource_type metadata
+ * @param {string} fileStr - Data URI string or video URL
+ * @param {string} folder - Destination folder on Cloudinary
+ * @returns {Promise<{ secure_url: string, duration: number, public_id: string }>}
  */
-export const deleteFromCloudinary = async (url) => {
+export const uploadVideoToCloudinary = async (fileStr, folder = "lokiverse/videos") => {
+  if (!fileStr || typeof fileStr !== "string") return null;
+  const client = configureCloudinary();
+  try {
+    const result = await client.uploader.upload(fileStr, {
+      folder,
+      resource_type: "video",
+    });
+    return {
+      secure_url: result.secure_url,
+      duration: result.duration || 0,
+      public_id: result.public_id,
+    };
+  } catch (err) {
+    console.error("Cloudinary video upload failed:", err?.message || err);
+    throw new Error(err?.message || "Cloudinary video upload failed");
+  }
+};
+
+/**
+ * Delete an image or video from Cloudinary using its secure URL
+ * @param {string} url - Cloudinary secure URL
+ * @param {string} [resourceType] - "image" | "video" | "raw" (auto-detected if omitted)
+ */
+export const deleteFromCloudinary = async (url, resourceType) => {
   if (!url || typeof url !== "string" || !url.includes("cloudinary.com")) return;
   const client = configureCloudinary();
   try {
     const uploadIndex = url.indexOf("/upload/");
     if (uploadIndex === -1) return;
+
+    // Detect resource type: /video/upload/ or explicitly passed
+    const isVideo = resourceType === "video" || url.includes("/video/upload/");
+    const type = isVideo ? "video" : (resourceType || "image");
 
     // Extract complete public_id including nested folders (e.g. "lokiverse/posts/xyz")
     const afterUpload = url.substring(uploadIndex + 8);
@@ -50,8 +80,8 @@ export const deleteFromCloudinary = async (url) => {
 
     if (!publicId) return;
 
-    const result = await client.uploader.destroy(publicId);
-    console.log(`Cloudinary destroyed [${publicId}]:`, result?.result);
+    const result = await client.uploader.destroy(publicId, { resource_type: type });
+    console.log(`Cloudinary destroyed [${publicId}] (${type}):`, result?.result);
     return result;
   } catch (err) {
     console.error("Cloudinary delete error:", err?.message || err);

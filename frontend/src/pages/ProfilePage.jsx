@@ -78,7 +78,9 @@ const ProfilePage = ({ onLogoutSuccess, authUser: initialAuthUser }) => {
       setPostsLoading(true);
       try {
         let endpoint = `/api/posts/user/${user.username}`;
-        if (activeTab === "replies") {
+        if (activeTab === "saved") {
+          endpoint = `/api/posts/saved`;
+        } else if (activeTab === "replies") {
           endpoint = `/api/posts/replies/${user.username}`;
         } else if (activeTab === "likes") {
           if (likesFilter === "given") {
@@ -107,6 +109,17 @@ const ProfilePage = ({ onLogoutSuccess, authUser: initialAuthUser }) => {
 
     fetchTabPosts();
   }, [user, activeTab, likesFilter]);
+
+  // Remove unsaved posts from Saved tab in real-time
+  useEffect(() => {
+    const handleSaveToggle = (e) => {
+      if (activeTab === "saved" && e.detail?.postId && e.detail.isSaved === false) {
+        setPosts((prev) => prev.filter((p) => p._id !== e.detail.postId));
+      }
+    };
+    window.addEventListener("postSaveToggled", handleSaveToggle);
+    return () => window.removeEventListener("postSaveToggled", handleSaveToggle);
+  }, [activeTab]);
 
   // Auto-dismiss toast
   useEffect(() => {
@@ -504,7 +517,8 @@ const ProfilePage = ({ onLogoutSuccess, authUser: initialAuthUser }) => {
           {/* Segmented Tabs */}
           <div className="flex border-b border-slate-200 dark:border-white/10 px-5 pt-2 bg-slate-50/60 dark:bg-black/30 backdrop-blur-md">
             {[
-              { id: "posts", label: "Posts" }
+              { id: "posts", label: "Posts" },
+              ...(isMyProfile ? [{ id: "saved", label: "Saved" }] : [])
             ].map((tab) => (
               <button
                 key={tab.id}
@@ -607,14 +621,18 @@ const ProfilePage = ({ onLogoutSuccess, authUser: initialAuthUser }) => {
                 <i /><i /><i /><i /><i /><i />
               </div>
               <h3 className="text-base font-bold text-slate-900 dark:text-white mb-1.5">
-                {activeTab === "replies"
+                {activeTab === "saved"
+                  ? "No saved transmissions"
+                  : activeTab === "replies"
                   ? "No replies on transmissions"
                   : activeTab === "likes"
                   ? (likesFilter === "received" ? "No likes received on posts yet" : "No liked transmissions")
                   : "No transmissions in dossier"}
               </h3>
               <p className="text-xs text-slate-600 dark:text-slate-400 max-w-sm mx-auto leading-relaxed">
-                {activeTab === "replies"
+                {activeTab === "saved"
+                  ? "Bookmarked transmissions from the timeline will be archived here in your personal dossier."
+                  : activeTab === "replies"
                   ? "When allies send comments or reply to this agent's intel, they will appear here with active discussion threads."
                   : activeTab === "likes"
                   ? (likesFilter === "received"

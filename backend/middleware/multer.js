@@ -3,18 +3,18 @@ import multer from "multer";
 // Configure memory storage for direct Cloudinary upload (no ephemeral disk dependency)
 const storage = multer.memoryStorage();
 
-// File validation: allow images only
+// File validation: allow images and videos
 const fileFilter = (req, file, cb) => {
-    if (file && file.mimetype && file.mimetype.startsWith("image/")) {
+    if (file && file.mimetype && (file.mimetype.startsWith("image/") || file.mimetype.startsWith("video/"))) {
         cb(null, true);
     } else {
-        cb(new Error("Only image files are allowed!"), false);
+        cb(new Error("Only image and video files are allowed!"), false);
     }
 };
 
 export const upload = multer({
     storage,
-    limits: { fileSize: 10 * 1024 * 1024 }, // 10MB limit
+    limits: { fileSize: 50 * 1024 * 1024 }, // 50MB limit to accommodate 1-min videos
     fileFilter
 });
 

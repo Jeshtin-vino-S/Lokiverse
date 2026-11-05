@@ -1,8 +1,9 @@
 import User from "../models/user_model.js";
 import Posts from "../models/post_schema.js";
 import Notification from "../models/notification_model.js";
+import Saved from "../models/saved_model.js";
 import { fileToDataUrl } from "../middleware/multer.js";
-import { uploadToCloudinary, deleteFromCloudinary } from "../utils/cloudinary.js";
+import { uploadToCloudinary, uploadVideoToCloudinary, deleteFromCloudinary } from "../utils/cloudinary.js";
 
 export const createPost = async (req, res) => {
     try {
@@ -15,14 +16,16 @@ export const createPost = async (req, res) => {
         }
 
         let img = "";
+        let video = "";
+        let videoDuration = 0;
 
-        // 1. Check for file uploaded via Multer (multipart/form-data)
-        const uploadedFile = req.file || (req.files?.img && req.files.img[0]) || (req.files?.image && req.files.image[0]);
-        if (uploadedFile) {
-            const dataUri = fileToDataUrl(uploadedFile);
+        // 1. Check for image file uploaded via Multer (multipart/form-data)
+        const uploadedImg = req.file || (req.files?.img && req.files.img[0]) || (req.files?.image && req.files.image[0]);
+        if (uploadedImg) {
+            const dataUri = fileToDataUrl(uploadedImg);
             img = await uploadToCloudinary(dataUri, "lokiverse/posts");
         }
-        // 2. Check for base64 or URL passed in req.body
+        // 2. Check for base64 or URL image passed in req.body
         else if (req.body.img || req.body.image) {
             const rawImg = req.body.img || req.body.image;
             if (typeof rawImg === "string" && rawImg.trim() !== "") {
@@ -34,14 +37,34 @@ export const createPost = async (req, res) => {
             }
         }
 
-        if (!text && !img) {
-            return res.status(400).json({ error: "Post must have text or image" });
+        // 3. Check for video file uploaded via Multer (multipart/form-data)
+        const uploadedVideo = req.files?.video && req.files.video[0];
+        if (uploadedVideo) {
+            const videoDataUri = fileToDataUrl(uploadedVideo);
+            const videoResult = await uploadVideoToCloudinary(videoDataUri, "lokiverse/videos");
+            if (videoResult) {
+                // Enforce 1-minute maximum duration (allowing 1s margin for 60s clips)
+                if (videoResult.duration && videoResult.duration > 61) {
+                    await deleteFromCloudinary(videoResult.secure_url, "video");
+                    return res.status(400).json({
+                        error: "Video duration exceeds the 1-minute limit (maximum 60 seconds allowed)"
+                    });
+                }
+                video = videoResult.secure_url;
+                videoDuration = Math.round(videoResult.duration || 0);
+            }
+        }
+
+        if (!text && !img && !video) {
+            return res.status(400).json({ error: "Post must have text, image, or video" });
         }
 
         const newPost = new Posts({
             user: userId,
             text: text || "",
-            img: img || ""
+            img: img || "",
+            video: video || "",
+            videoDuration: videoDuration || 0
         });
 
         await newPost.save();
@@ -151,10 +174,18 @@ export const deletePost = async (req, res) => {
             return res.status(401).json({ error: "You are not authorized to delete this post" });
         }
 
-        // Delete post image from Cloudinary if it exists
+        // Delete post image or video from Cloudinary if exists
         if (post.img) {
             await deleteFromCloudinary(post.img);
         }
+        if (post.video) {
+            await deleteFromCloudinary(post.video, "video");
+        }
+
+        // Delete any bookmarks for this post from the 'saved' collection
+        await Saved.deleteMany({
+            $or: [{ post_id: id }, { postId: id }]
+        });
 
         await Posts.findByIdAndDelete(id);
 
@@ -304,6 +335,129 @@ export const getUserReplies = async (req, res) => {
         return res.status(200).json(posts || []);
     } catch (error) {
         console.log(`error in get user replies : ${error}`);
+        return res.status(500).json({ error: "Internal server error" });
+    }
+};
+
+export const saveUnsavePost = async (req, res) => {
+    try {
+        const userId = req.user._id;
+        const { id: postId } = req.params;
+
+        const post = await Posts.findById(postId);
+        if (!post) {
+            return res.status(404).json({ error: "Transmission not found" });
+        }
+
+        // Check if already in 'saved' collection
+        const existingSaved = await Saved.findOne({
+            $or: [
+                { user_id: userId, post_id: postId },
+                { userId, postId }
+            ]
+        });
+
+        if (existingSaved) {
+            // Unsave: Delete from 'saved' collection
+            await Saved.findByIdAndDelete(existingSaved._id);
+
+            // Also sync user.savedPosts
+            await User.updateOne({ _id: userId }, { $pull: { savedPosts: postId } });
+
+            return res.status(200).json({
+                message: "Transmission removed from bookmarks",
+                isSaved: false,
+                postId
+            });
+        } else {
+            // Save: Create document in 'saved' collection with ONLY user_id and post_id
+            await Saved.create({
+                user_id: userId,
+                post_id: postId
+            });
+
+            // Also sync user.savedPosts
+            await User.updateOne({ _id: userId }, { $addToSet: { savedPosts: postId } });
+
+            return res.status(200).json({
+                message: "Transmission saved to your dossier",
+                isSaved: true,
+                postId
+            });
+        }
+    } catch (error) {
+        console.error("error in saveUnsavePost:", error?.message || error);
+        return res.status(500).json({ error: "Internal server error" });
+    }
+};
+
+export const getSavedPosts = async (req, res) => {
+    try {
+        const userId = req.user._id;
+
+        // Fetch from 'saved' collection directly
+        const savedDocs = await Saved.find({
+            $or: [{ user_id: userId }, { userId }]
+        })
+            .sort({ createdAt: -1 })
+            .populate({
+                path: "post_id",
+                populate: [
+                    {
+                        path: "user",
+                        select: "username fullname profileImg bio followers following"
+                    },
+                    {
+                        path: "comments.user",
+                        select: "username fullname profileImg bio followers following"
+                    },
+                    {
+                        path: "likes",
+                        select: "username fullname profileImg bio followers following"
+                    }
+                ]
+            })
+            .populate({
+                path: "postId",
+                populate: [
+                    {
+                        path: "user",
+                        select: "username fullname profileImg bio followers following"
+                    },
+                    {
+                        path: "comments.user",
+                        select: "username fullname profileImg bio followers following"
+                    },
+                    {
+                        path: "likes",
+                        select: "username fullname profileImg bio followers following"
+                    }
+                ]
+            });
+
+        // Filter valid posts
+        const posts = savedDocs
+            .map((doc) => doc.post_id || doc.postId)
+            .filter((p) => p !== null && p !== undefined);
+
+        return res.status(200).json(posts || []);
+    } catch (error) {
+        console.error("error in getSavedPosts:", error?.message || error);
+        return res.status(500).json({ error: "Internal server error" });
+    }
+};
+
+export const getSavedPostIds = async (req, res) => {
+    try {
+        const userId = req.user._id;
+        const savedDocs = await Saved.find({
+            $or: [{ user_id: userId }, { userId }]
+        }).select("user_id post_id postId");
+
+        const ids = savedDocs.map((doc) => (doc.post_id || doc.postId).toString());
+        return res.status(200).json(ids);
+    } catch (error) {
+        console.error("error in getSavedPostIds:", error?.message || error);
         return res.status(500).json({ error: "Internal server error" });
     }
 };

@@ -1,4 +1,6 @@
 import Message from "../models/Message.js";
+import User from "../models/user_model.js";
+import Posts from "../models/post_schema.js";
 
 /**
  * Cursor-based history & pagination:
@@ -230,6 +232,137 @@ export const reactToMessage = async (req, res) => {
   } catch (error) {
     console.error("Error in reactToMessage:", error);
     res.status(500).json({ error: "Internal server error" });
+  }
+};
+
+/**
+ * GET /api/messages/contacts
+ * Returns list of unique users from current user's followers and following
+ */
+export const getShareContacts = async (req, res) => {
+  try {
+    const user = await User.findById(req.user._id)
+      .populate({ path: "followers", select: "username fullname profileImg bio lastSeen" })
+      .populate({ path: "following", select: "username fullname profileImg bio lastSeen" });
+
+    if (!user) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    const contactMap = new Map();
+    const myIdStr = req.user._id.toString();
+
+    // Map following & followers
+    const followingSet = new Set(
+      (user.following || []).map((f) => (typeof f === "object" ? f._id?.toString() : f?.toString()))
+    );
+    const followersSet = new Set(
+      (user.followers || []).map((f) => (typeof f === "object" ? f._id?.toString() : f?.toString()))
+    );
+
+    const allContacts = [...(user.followers || []), ...(user.following || [])];
+    for (const c of allContacts) {
+      if (c && c._id) {
+        const cIdStr = c._id.toString();
+        if (cIdStr !== myIdStr && !contactMap.has(cIdStr)) {
+          const isMutual = followingSet.has(cIdStr) && followersSet.has(cIdStr);
+          const isFollowing = followingSet.has(cIdStr);
+          contactMap.set(cIdStr, {
+            _id: c._id,
+            username: c.username,
+            fullname: c.fullname,
+            profileImg: c.profileImg,
+            bio: c.bio,
+            lastSeen: c.lastSeen,
+            isMutual,
+            isFollowing,
+          });
+        }
+      }
+    }
+
+    // Sort: Mutuals first, then followed allies, then alphabetically
+    const sorted = Array.from(contactMap.values()).sort((a, b) => {
+      if (a.isMutual && !b.isMutual) return -1;
+      if (!a.isMutual && b.isMutual) return 1;
+      if (a.isFollowing && !b.isFollowing) return -1;
+      if (!a.isFollowing && b.isFollowing) return 1;
+      return (a.fullname || a.username).localeCompare(b.fullname || b.username);
+    });
+
+    return res.status(200).json(sorted);
+  } catch (error) {
+    console.error("Error in getShareContacts:", error);
+    return res.status(500).json({ error: "Internal server error" });
+  }
+};
+
+/**
+ * POST /api/messages/share-post
+ * Body: { recipientId, postId, messageText }
+ */
+export const sharePostToUser = async (req, res) => {
+  try {
+    const senderUsername = req.user.username;
+    const senderId = req.user._id.toString();
+    const { recipientId, postId, messageText } = req.body;
+
+    if (!recipientId || !postId) {
+      return res.status(400).json({ error: "recipientId and postId are required" });
+    }
+
+    const recipient = await User.findById(recipientId);
+    if (!recipient) {
+      return res.status(404).json({ error: "Recipient not found" });
+    }
+
+    const post = await Posts.findById(postId).populate({
+      path: "user",
+      select: "username fullname profileImg",
+    });
+
+    if (!post) {
+      return res.status(404).json({ error: "Transmission not found" });
+    }
+
+    // Construct direct message room ID
+    const cleanRoomId = [senderId, recipientId.toString()].sort().join("_");
+
+    // Format Instagram-like transmission intel preview
+    const postSnippet = post.text
+      ? (post.text.length > 80 ? post.text.slice(0, 80) + "..." : post.text)
+      : (post.img ? "[Image Intel]" : "[Video Transmission]");
+
+    const formattedText = messageText && messageText.trim()
+      ? `${messageText.trim()}\n\n⚡ Shared Transmission from @${post.user?.username || "agent"}:\n"${postSnippet}"`
+      : `⚡ Shared Transmission from @${post.user?.username || "agent"}:\n"${postSnippet}"`;
+
+    const newMessage = new Message({
+      roomId: cleanRoomId,
+      sender: senderUsername,
+      text: formattedText,
+    });
+
+    const savedMessage = await newMessage.save();
+
+    // Broadcast via socket.io if available
+    const io = req.app.get("io");
+    if (io) {
+      io.to(cleanRoomId).emit("receive_message", savedMessage);
+      io.to(recipientId.toString()).emit("new_message_notification", {
+        message: savedMessage,
+        roomId: cleanRoomId,
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Transmission shared successfully",
+      savedMessage,
+    });
+  } catch (error) {
+    console.error("Error in sharePostToUser:", error);
+    return res.status(500).json({ error: "Internal server error" });
   }
 };
 

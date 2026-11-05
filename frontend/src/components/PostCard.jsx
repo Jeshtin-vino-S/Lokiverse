@@ -3,6 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import axios from "axios";
 import { strikeThunder, snapAndRemove, smash } from "../heroFx";
 import PostLikesModal from "./PostLikesModal";
+import SharePostModal from "./SharePostModal";
 
 const PostCard = ({
   post,
@@ -18,10 +19,42 @@ const PostCard = ({
   const [comments, setComments] = useState(post.comments || []);
   const [showComments, setShowComments] = useState(defaultShowComments);
   const [showLikesModal, setShowLikesModal] = useState(false);
+  const [showShareModal, setShowShareModal] = useState(false);
   const [commentText, setCommentText] = useState("");
   const [commentLoading, setCommentLoading] = useState(false);
   const [isLiking, setIsLiking] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [isSaved, setIsSaved] = useState(() => {
+    if (post.isSaved !== undefined) return Boolean(post.isSaved);
+    if (!currentUser?.savedPosts) return false;
+    return currentUser.savedPosts.some(
+      (id) =>
+        (typeof id === "object" ? id._id?.toString() : id?.toString()) ===
+        post._id?.toString()
+    );
+  });
+
+  useEffect(() => {
+    const handleSaveToggle = (e) => {
+      if (e.detail?.postId && e.detail.postId.toString() === post._id?.toString()) {
+        setIsSaved(e.detail.isSaved);
+      }
+    };
+    window.addEventListener("postSaveToggled", handleSaveToggle);
+    return () => window.removeEventListener("postSaveToggled", handleSaveToggle);
+  }, [post._id]);
+
+  useEffect(() => {
+    if (currentUser?.savedPosts) {
+      const saved = currentUser.savedPosts.some(
+        (id) =>
+          (typeof id === "object" ? id._id?.toString() : id?.toString()) ===
+          post._id?.toString()
+      );
+      setIsSaved(saved);
+    }
+  }, [currentUser?.savedPosts, post._id]);
 
   useEffect(() => {
     if (defaultShowComments) {
@@ -216,6 +249,68 @@ const PostCard = ({
     }
   };
 
+  // Share Transmission (Web Share API or Clipboard)
+  const handleShare = async (e) => {
+    e.stopPropagation();
+    const shareUrl = `${window.location.origin}/profile/${postAuthor.username || ""}`;
+    if (navigator.share) {
+      try {
+        await navigator.share({
+          title: `Lokiverse - Transmission from @${postAuthor.username || "agent"}`,
+          text: post.text || "Check out this intel on Lokiverse!",
+          url: shareUrl,
+        });
+        return;
+      } catch (err) {
+        // User cancelled or unsupported
+      }
+    }
+    try {
+      await navigator.clipboard.writeText(shareUrl);
+      setShareCopied(true);
+      setTimeout(() => setShareCopied(false), 2000);
+    } catch (err) {
+      console.error("Clipboard copy failed:", err);
+    }
+  };
+
+  // Save / Bookmark Transmission against Authenticated User in DB
+  const handleSave = async (e) => {
+    e.stopPropagation();
+    if (isSaving || !currentUser?._id) return;
+
+    setIsSaving(true);
+    const nextSaved = !isSaved;
+    setIsSaved(nextSaved);
+
+    try {
+      const res = await axios.post(`/api/posts/save/${post._id}`);
+      if (typeof res.data?.isSaved === "boolean") {
+        setIsSaved(res.data.isSaved);
+        if (currentUser.savedPosts) {
+          if (res.data.isSaved) {
+            if (!currentUser.savedPosts.some(id => (typeof id === "object" ? id._id?.toString() : id?.toString()) === post._id.toString())) {
+              currentUser.savedPosts.push(post._id);
+            }
+          } else {
+            currentUser.savedPosts = currentUser.savedPosts.filter(
+              id => (typeof id === "object" ? id._id?.toString() : id?.toString()) !== post._id.toString()
+            );
+          }
+        }
+        window.dispatchEvent(
+          new CustomEvent("postSaveToggled", {
+            detail: { postId: post._id, isSaved: res.data.isSaved },
+          })
+        );
+      }
+    } catch (err) {
+      setIsSaved(!nextSaved);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
   // Add Comment (Intel Transmission)
   const handleAddComment = async (e) => {
     e.preventDefault();
@@ -351,7 +446,7 @@ const PostCard = ({
               </p>
             )}
 
-            {/* Post Attachment */}
+            {/* Post Attachment (Image) */}
             {postImage && (
               <div className="mb-3 rounded-2xl overflow-hidden border border-slate-200 dark:border-white/10 max-h-96 flex items-center justify-center bg-slate-100 dark:bg-black/40">
                 <img
@@ -366,8 +461,21 @@ const PostCard = ({
               </div>
             )}
 
+            {/* Post Attachment (Video - up to 1 min) */}
+            {post.video && (
+              <div className="mb-3 rounded-2xl overflow-hidden border border-slate-200 dark:border-white/10 max-h-96 flex items-center justify-center bg-black">
+                <video
+                  src={post.video}
+                  controls
+                  playsInline
+                  preload="metadata"
+                  className="w-full max-h-96 rounded-2xl bg-black object-contain"
+                />
+              </div>
+            )}
+
             {/* Post Action Toolbar */}
-            <div className="flex items-center gap-6 sm:gap-8 pt-1 text-slate-500 dark:text-slate-400 text-xs">
+            <div className="flex items-center justify-between pt-1 text-slate-500 dark:text-slate-400 text-xs max-w-md">
               {/* Comment Drawer Trigger */}
               <button
                 type="button"
@@ -404,6 +512,46 @@ const PostCard = ({
                   )}
                 </div>
                 <span className="font-semibold">{likes.length}</span>
+              </button>
+
+              {/* Share Transmission Button (Telegram Paper Plane Icon) */}
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setShowShareModal(true);
+                }}
+                className="flex items-center gap-1.5 hover:text-cyan-500 dark:hover:text-cyan-400 transition-colors cursor-pointer group fx-ant-hover relative"
+                title="Share to Allies (Instagram Style)"
+              >
+                <div className="p-1.5 rounded-full group-hover:bg-cyan-500/10 dark:group-hover:bg-cyan-500/10 transition-colors">
+                  <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor">
+                    <path d="M21.68 3.32a1.5 1.5 0 0 0-1.63-.32L2.83 10.37a1.5 1.5 0 0 0 .1 2.82l5.12 1.71 1.95 6.02a1.5 1.5 0 0 0 2.45.62l3.05-2.73 4.8 3.52a1.5 1.5 0 0 0 2.38-.97l3-16.5a1.5 1.5 0 0 0-1.04-1.54zM18.5 6.78L9.95 13.9l-.35 3.12-1.13-3.48 10.03-6.76z" />
+                  </svg>
+                </div>
+              </button>
+
+              {/* Save / Bookmark Transmission Button */}
+              <button
+                type="button"
+                onClick={handleSave}
+                disabled={isSaving}
+                className={`flex items-center gap-1.5 transition-colors cursor-pointer group fx-ant-hover ${
+                  isSaved ? "text-amber-500 dark:text-amber-400" : "hover:text-amber-500 dark:hover:text-amber-400"
+                }`}
+                title={isSaved ? "Remove from Saved Intel" : "Save Transmission to Dossier"}
+              >
+                <div className="p-1.5 rounded-full group-hover:bg-amber-500/10 transition-colors">
+                  {isSaved ? (
+                    <svg viewBox="0 0 24 24" width="17" height="17" fill="currentColor">
+                      <path d="M19 21l-7-5-7 5V5c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2v16z" />
+                    </svg>
+                  ) : (
+                    <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M19 21l-7-5-7 5V5c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2v16z" />
+                    </svg>
+                  )}
+                </div>
               </button>
             </div>
 
@@ -559,6 +707,15 @@ const PostCard = ({
               }
             }
           }}
+        />
+      )}
+
+      {/* Instagram-Style Share Modal */}
+      {showShareModal && (
+        <SharePostModal
+          post={post}
+          currentUser={currentUser}
+          onClose={() => setShowShareModal(false)}
         />
       )}
     </>

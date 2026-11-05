@@ -59,6 +59,7 @@ const io = new Server(httpServer, {
     credentials: true,
   },
 });
+app.set("io", io);
 
 // Helper to reliably parse cookies from header
 const parseCookies = (cookieHeader) => {
